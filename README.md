@@ -1,7 +1,7 @@
 # Aim
 Its about a.i.
 
-Some langchain file. 
+Some langchain files. 
 At this time it requires running llama server
 and self hosting a searNXG search.
 
