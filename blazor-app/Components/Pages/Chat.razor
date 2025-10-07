@@ -1,0 +1,261 @@
+@page "/chat"
+@rendermode InteractiveServer
+@using System.Text.Json
+@using System.Text
+@using System.Text.Json.Serialization
+
+<PageTitle>Agent Chat</PageTitle>
+
+<h1>Privy</h1>
+<p>Welcome to Privy. Privacy you didn't know you needed. Ask me something?</p>
+
+<div class="chat-container">
+    @foreach (var message in messages)
+    {
+        <div class="message @message.CssClass">
+            <div class="icon">@(message.IsUser ? "You" : "🤖")</div>
+            <div class="text">@((MarkupString)message.Content)</div>
+        </div>
+    }
+    @if (isLoading)
+    {
+        <div class="message assistant">
+            <div class="icon">🤖</div>
+            <div class="text"><i>@loadingStatus</i></div>
+        </div>
+    }
+</div>
+
+<form @onsubmit="SendPrompt" class="input-area">
+    <input @bind="currentPrompt" @bind:event="oninput" placeholder="Ask something..." disabled="@isLoading" />
+    <button type="submit" disabled="@isLoading">Send</button>
+</form>
+
+@code {
+    [Inject]
+    private HttpClient Http { get; set; } = default!;
+
+    private List<Message> messages = new();
+    private string currentPrompt = "";
+    private bool isLoading = false;
+    private string loadingStatus = "Thinking...";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (messages.Count > 0)
+        {
+            await ScrollToBottom();
+        }
+    }
+
+    private async Task ScrollToBottom()
+    {
+        await JSRuntime.InvokeVoidAsync("eval", "document.querySelector('.chat-container').scrollTop = document.querySelector('.chat-container').scrollHeight;");
+    }
+
+    private async Task SendPrompt()
+    {
+        if (string.IsNullOrWhiteSpace(currentPrompt) || isLoading)
+        {
+            return;
+        }
+
+        messages.Add(new Message(currentPrompt, true));
+        var promptToSend = currentPrompt;
+        currentPrompt = "";
+        isLoading = true;
+        loadingStatus = "Thinking...";
+        StateHasChanged();
+
+        await ScrollToBottom();
+
+        var assistantMessage = new Message("", false);
+        messages.Add(assistantMessage);
+
+        try
+        {
+            var requestData = new { input = promptToSend };
+            var content = new StringContent(JsonSerializer.Serialize(requestData), Encoding.UTF8, "application/json");
+            var request = new HttpRequestMessage(HttpMethod.Post, "http://host.docker.internal:8000/agent-chat") { Content = content };
+            
+            using var response = await Http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead);
+
+            if (!response.IsSuccessStatusCode)
+            {
+                assistantMessage.Content = $"Error: {response.ReasonPhrase}";
+                return;
+            }
+
+            using var stream = await response.Content.ReadAsStreamAsync();
+            using var reader = new StreamReader(stream);
+
+            while (!reader.EndOfStream)
+            {
+                var line = await reader.ReadLineAsync();
+                
+                if (string.IsNullOrEmpty(line) || !line.StartsWith("data: ")) continue;
+                
+                var jsonData = line.Substring(6);
+                var agentEvent = JsonSerializer.Deserialize<AgentEvent>(jsonData);
+
+                if (agentEvent != null)
+                {
+                    switch (agentEvent.Type)
+                    {
+                        case "token":
+                            assistantMessage.Content += agentEvent.Content;
+                            break;
+                        case "tool_start":
+                            loadingStatus = $"🛠️ Calling tool: {agentEvent.Name}...";
+                            break;
+                        case "tool_end":
+                            loadingStatus = "Thinking...";
+                            break;
+                    }
+                    StateHasChanged();
+                    await ScrollToBottom();
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"An exception occurred: {ex}");
+            assistantMessage.Content = $"An error occurred: {ex.Message}";
+        }
+        finally
+        {
+            isLoading = false;
+            StateHasChanged();
+            await ScrollToBottom();
+        }
+    }
+
+    [Inject]
+    private IJSRuntime JSRuntime { get; set; } = default!;
+
+    public record Message(string Content, bool IsUser)
+    {
+        public string Content { get; set; } = Content;
+        public string CssClass => IsUser ? "user" : "assistant";
+    }
+    
+    public class AgentEvent
+    {
+        [JsonPropertyName("type")]
+        public string Type { get; set; } = "";
+
+        [JsonPropertyName("content")]
+        public string? Content { get; set; }
+
+        [JsonPropertyName("name")]
+        public string? Name { get; set; }
+
+        [JsonPropertyName("output")]
+        public string? Output { get; set; }
+    }
+}
+
+<style>
+    .chat-container {
+        height: 50vh; /* Reduced from 70vh to 50vh */
+        max-height: 400px; /* Added maximum height */
+        overflow-y: auto;
+        border: 1px solid #ccc;
+        border-radius: 8px;
+        padding: 10px;
+        margin-bottom: 10px;
+        background-color: #f9f9f9;
+        display: flex;
+        flex-direction: column;
+        gap: 10px; /* Reduced gap between messages */
+    }
+
+    .message {
+        display: flex;
+        align-items: flex-start;
+        max-width: 85%; /* Slightly wider messages */
+    }
+
+    .message.user {
+        align-self: flex-end;
+        flex-direction: row-reverse;
+    }
+
+    .message.assistant {
+        align-self: flex-start;
+    }
+
+    .message .icon {
+        font-size: 1.2rem; /* Smaller icons */
+        margin: 0 8px; /* Reduced margin */
+        min-width: 40px; /* Fixed width for alignment */
+        text-align: center;
+    }
+
+    .message .text {
+        padding: 8px 12px; /* Reduced padding */
+        border-radius: 12px; /* Slightly smaller radius */
+        background-color: #e0e0e0;
+        word-wrap: break-word;
+        white-space: pre-wrap;
+        font-size: 0.9rem; /* Slightly smaller text */
+        line-height: 1.3; /* Better line spacing */
+    }
+
+    .message.user .text {
+        background-color: #007bff;
+        color: white;
+    }
+
+    .message.assistant .text {
+        background-color: #ffffff;
+        border: 1px solid #ddd;
+    }
+    
+    .input-area {
+        display: flex;
+        gap: 8px; /* Reduced gap */
+    }
+
+    .input-area input {
+        flex-grow: 1;
+        padding: 8px 12px; /* Reduced padding */
+        border-radius: 5px;
+        border: 1px solid #ccc;
+        font-size: 0.9rem; /* Smaller font */
+    }
+
+    .input-area button {
+        padding: 8px 16px; /* Reduced padding */
+        border-radius: 5px;
+        border: none;
+        background-color: #007bff;
+        color: white;
+        cursor: pointer;
+        font-size: 0.9rem; /* Smaller font */
+    }
+    
+    .input-area button:disabled {
+        background-color: #aaa;
+        cursor: not-allowed;
+    }
+
+    /* Better scrollbar styling */
+    .chat-container::-webkit-scrollbar {
+        width: 6px;
+    }
+
+    .chat-container::-webkit-scrollbar-track {
+        background: #f1f1f1;
+        border-radius: 3px;
+    }
+
+    .chat-container::-webkit-scrollbar-thumb {
+        background: #c1c1c1;
+        border-radius: 3px;
+    }
+
+    .chat-container::-webkit-scrollbar-thumb:hover {
+        background: #a8a8a8;
+    }
+</style>

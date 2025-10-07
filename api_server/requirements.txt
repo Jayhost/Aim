@@ -1,0 +1,13 @@
+fastapi
+uvicorn
+python-multipart
+requests
+pydantic
+sse-starlette>=1.6.0
+langchain>=0.0.300
+langchain-openai
+langchain_community
+
+
+
+

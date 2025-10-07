@@ -1,0 +1,14 @@
+# settings.yml
+use_default_settings: true
+
+
+server:
+  # This makes SearXNG accessible from your host machine
+  secret_key: 9f03a0ff04daf05d162ede4b69a68fb5888c1cda21a32c5dd135f9a00a0b00a7
+  bind_address: "0.0.0.0"
+
+search:
+  # Enable both HTML (for browser) and JSON (for your tool) formats
+  formats:
+    - html
+    - json

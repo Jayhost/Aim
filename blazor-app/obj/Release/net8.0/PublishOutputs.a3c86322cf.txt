@@ -1,0 +1,7 @@
+/home/ian/local-ai/blazor-app/wwwroot/MyBlazorApp
+/home/ian/local-ai/blazor-app/wwwroot/appsettings.Development.json
+/home/ian/local-ai/blazor-app/wwwroot/appsettings.json
+/home/ian/local-ai/blazor-app/wwwroot/MyBlazorApp.dll
+/home/ian/local-ai/blazor-app/wwwroot/MyBlazorApp.deps.json
+/home/ian/local-ai/blazor-app/wwwroot/MyBlazorApp.runtimeconfig.json
+/home/ian/local-ai/blazor-app/wwwroot/MyBlazorApp.pdb

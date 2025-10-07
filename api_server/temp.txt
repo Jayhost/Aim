@@ -1,0 +1,752 @@
+# --- Agent Executor (agent.py) ---
+# File: agent.py
+
+from langchain.agents import create_tool_calling_agent
+from langchain.agents import AgentExecutor
+from langchain_core.prompts import ChatPromptTemplate
+from langchain_openai import ChatOpenAI
+from config import MODEL_NAME
+from tools import ALL_TOOLS
+from datetime import datetime
+
+# Caching to prevent repeated agent creation
+_cached_llm = None
+_cached_agent = None
+_cached_executor = None
+
+def create_agent_executor():
+    """Create agent that uses fast tool routing."""
+    global _cached_llm, _cached_agent, _cached_executor
+
+    if _cached_executor is not None:
+        return _cached_executor
+
+    if _cached_llm is None:
+        _cached_llm = ChatOpenAI(
+            base_url="http://llama:8080/v1",
+            api_key="sk-no-key-required",
+            model=MODEL_NAME,
+            streaming=True,
+            temperature=0,
+        )
+
+    # Import the fast routing function
+    from tools import route_to_tool_directly
+
+    # SIMPLE system prompt that forces tool usage
+    system_prompt = f"""You are a helpful assistant. Current date: {datetime.now().strftime("%A, %B %d, %Y")}.
+
+**RULES:**
+- ALWAYS use tools for information requests
+- NEVER answer factual questions directly
+- Use search_tool for: who, what, when, news, current information
+- Use weather_tool for: weather queries  
+- Use dad_joke_tool for: jokes
+
+**EXAMPLES:**
+"who is president" → search_tool
+"weather london" → weather_tool
+"tell me a joke" → dad_joke_tool
+
+Just use the appropriate tool immediately."""
+
+    prompt = ChatPromptTemplate.from_messages([
+        ("system", system_prompt),
+        ("placeholder", "{chat_history}"),
+        ("human", "{input}"),
+        ("placeholder", "{agent_scratchpad}"),
+    ])
+
+    _cached_agent = create_tool_calling_agent(
+        llm=_cached_llm,
+        tools=ALL_TOOLS,
+        prompt=prompt
+    )
+
+    # Create a custom executor that uses fast routing
+    class FastAgentExecutor(AgentExecutor):
+        async def ainvoke(self, input, *args, **kwargs):
+            # Fast pre-routing before agent reasoning
+            from tools import route_to_tool_directly
+            fast_tool = route_to_tool_directly(input.get('input', ''))
+            
+            if fast_tool and fast_tool == 'search_tool':
+                print(f"🚀 FAST ROUTING to search_tool for: {input['input']}")
+                # Force search tool usage
+                from tools import search_tool
+                result = search_tool.invoke({"query": input['input']})
+                return {"output": result, "intermediate_steps": []}
+            
+            # Fall back to normal agent for other cases
+            return await super().ainvoke(input, *args, **kwargs)
+
+    _cached_executor = FastAgentExecutor(
+        agent=_cached_agent,
+        tools=ALL_TOOLS,
+        verbose=True,  # Keep verbose to see what's happening
+        handle_parsing_errors=True,
+        max_iterations=2,
+        early_stopping_method="generate",
+    )
+
+    return _cached_executor# File: api_server.py
+
+import asyncio
+import json
+from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
+from sse_starlette.sse import EventSourceResponse
+import logging
+
+# Set up logging
+# logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger("api_server")
+
+# Import your existing agent creator
+from agent import create_agent_executor
+
+def ultra_fast_response(query: str) -> str | None:
+    """Ultra-fast responses for common queries without any agent overhead."""
+    query_lower = query.lower().strip()
+    
+    # Direct cached responses for super common queries
+    instant_responses = {
+        "hello": "Hello! How can I help you today?",
+        "hi": "Hi there! What can I assist you with?",
+        "how are you": "I'm doing well, thank you! How can I help you?",
+        "what is your name": "I'm Privy, your AI assistant!",
+        "who are you": "I'm Privy, an AI assistant designed to help you find information.",
+    }
+    
+    if query_lower in instant_responses:
+        return instant_responses[query_lower]
+    
+    # Pre-route to tools with cached results
+    tool_routes = {
+        "weather": "weather_tool",
+        "news": "search_tool", 
+        "joke": "dad_joke_tool",
+    }
+    
+    for keyword, tool in tool_routes.items():
+        if keyword in query_lower:
+            # Check cache first for instant response
+            cached = get_cached_result(query_lower)
+            if cached:
+                return f"[Fast cached result] {cached}"
+    
+    return None
+
+# Initialize the agent executor once on startup
+# logger.debug("🔄 Initializing agent executor...")
+agent_executor = create_agent_executor()
+# logger.debug("✅ Agent executor initialized")
+
+# --- FastAPI App Setup ---
+app = FastAPI()
+
+# Configure CORS to allow your Blazor app to connect
+# IMPORTANT: In production, you should restrict the origins.
+origins = [
+    "http://localhost:5000", # Example Blazor dev server port
+    "https://localhost:5001",
+    "http://localhost:5199", # Another common Blazor port
+    "https://localhost:7155"
+]
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+# Define the request model to match what Blazor will send
+class ChatRequest(BaseModel):
+    input: str
+
+# --- Streaming Event Generator ---
+async def stream_agent_response(chat_request: ChatRequest):
+    """
+    Calls the agent's astream_events and yields formatted Server-Sent Events.
+    """
+    # logger.debug(f"🎯 Starting stream for query: '{chat_request.input}'")
+    
+    # ULTRA-FAST PRE-CHECK
+    fast_response = ultra_fast_response(chat_request.input)
+    if fast_response:
+        logger.debug(f"🚀 ULTRA-FAST response for: '{chat_request.input}'")
+        # Yield the fast response immediately
+        yield {
+            "event": "message",
+            "data": json.dumps({"type": "token", "content": fast_response})
+        }
+        return
+
+
+    event_count = 0
+    try:
+        async for event in agent_executor.astream_events(
+            {"input": chat_request.input},
+            version="v1",
+        ):
+            event_count += 1
+            kind = event["event"]
+            data_payload = {}
+            
+            # logger.debug(f"🔄 Event {event_count}: {kind}")
+
+            if kind == "on_chat_model_stream":
+                content = event["data"]["chunk"].content
+                if content:
+                    data_payload = {"type": "token", "content": content}
+                    # logger.debug(f"💬 Token: {content[:50]}...")
+            
+            elif kind == "on_tool_start":
+                tool_name = event['name']
+                tool_input = event['data'].get('input')
+                data_payload = {
+                    "type": "tool_start", 
+                    "name": tool_name,
+                    "input": tool_input
+                }
+                # logger.debug(f"🛠️ Tool START: {tool_name} with input: {str(tool_input)[:100]}...")
+        
+            elif kind == "on_tool_end":
+                tool_name = event['name']
+                tool_output = event['data'].get('output', '')
+                data_payload = {
+                    "type": "tool_end",
+                    "name": tool_name,
+                    "output": tool_output
+                }
+                # logger.debug(f"🛠️ Tool END: {tool_name} with output length: {len(str(tool_output))}")
+                # logger.debug(f"🛠️ Tool output sample: {str(tool_output)[:200]}...")
+
+            elif kind == "on_chain_start":
+                chain_name = event["name"]
+                # logger.debug(f"⛓️ Chain START: {chain_name}")
+
+            elif kind == "on_chain_end":
+                chain_name = event["name"]
+                # logger.debug(f"⛓️ Chain END: {chain_name}")
+                if chain_name == "AgentExecutor":
+                    output_data = event['data'].get('output', {})
+                    # logger.debug(f"🏁 AgentExecutor finished with output: {str(output_data)[:200]}...")
+            
+            # Yield the event if it has content
+            if data_payload:
+                yield {
+                    "event": "message",
+                    "data": json.dumps(data_payload)
+                }
+                
+        # logger.debug(f"✅ Stream completed. Total events: {event_count}")
+
+    except Exception as e:
+        # logger.error(f"❌ Error in stream_agent_response: {e}")
+        import traceback
+        # logger.error(f"❌ Traceback: {traceback.format_exc()}")
+        
+        # Yield an error event to the client
+        error_payload = {
+            "type": "error",
+            "content": f"An error occurred: {str(e)}"
+        }
+        yield {
+            "event": "message",
+            "data": json.dumps(error_payload)
+        }
+
+# --- API Endpoint ---
+@app.post("/agent-chat")
+async def chat_endpoint(chat_request: ChatRequest):
+    """
+    The main chat endpoint that Blazor will call.
+    """
+    # logger.debug(f"📥 Received chat request: '{chat_request.input}'")
+    return EventSourceResponse(stream_agent_response(chat_request))
+
+@app.get("/health")
+async def health_check():
+    """Health check endpoint to verify the API is running."""
+    return {"status": "healthy", "service": "cluj-ai-api"}
+
+@app.get("/tools")
+async def list_tools():
+    """Debug endpoint to list available tools."""
+    try:
+        from tools import ALL_TOOLS
+        tools_info = []
+        for tool in ALL_TOOLS:
+            tools_info.append({
+                "name": tool.name,
+                "description": tool.description,
+                "args": str(tool.args)
+            })
+        return {"tools": tools_info}
+    except Exception as e:
+        return {"error": str(e)}
+
+@app.get("/test-search")
+async def test_search():
+    """Test the search tool directly"""
+    try:
+        from tools import search_tool
+        result = search_tool("current president of the United States")
+        return {
+            "status": "search_tool test completed",
+            "result_length": len(result),
+            "result_preview": result[:500] + "..." if len(result) > 500 else result
+        }
+    except Exception as e:
+        return {"status": "search_tool test failed", "error": str(e)}
+
+if __name__ == "__main__":
+    import uvicorn
+    # logger.info("🚀 Starting API server on http://127.0.0.1:8000")
+    uvicorn.run(app, host="127.0.0.1", port=8000, log_level="debug")# config.py
+
+# This is now just a label for the model being used by the server.
+# The actual model is determined by the command used to start the llama.cpp server.
+# MODEL_NAME = "Qwen3-30B-A3B-Instruct-2507-Q3_K_M"
+MODEL_NAME = "Qwen3-4B-Instruct-2507-Q4_K_S"
+
+YT_DLP_PATH = "/usr/bin/yt-dlp"
+MPV_PATH = "/usr/bin/mpv"    
+# main.py (with enhanced coloring)
+import os
+import subprocess
+import shlex
+import shutil
+from functools import lru_cache
+from typing import Generator, List, AsyncGenerator
+import sys
+import asyncio
+import random
+
+# --- Standard Library Replacements for Typer ---
+
+# Expanded color palette for a cleaner interface
+COLORS = {
+    "green": "\033[92m",
+    "yellow": "\033[93m",
+    "red": "\033[91m",
+    "blue": "\033[94m",
+    "magenta": "\033[95m",
+    "cyan": "\033[96m",
+    "end": "\033[0m",
+}
+
+def cprint(text: str, color: str = ""):
+    """Prints text in a specified color."""
+    if color in COLORS:
+        print(f"{COLORS[color]}{text}{COLORS['end']}")
+    else:
+        print(text)
+
+# --- Original Application Logic ---
+from dotenv import load_dotenv
+load_dotenv()
+
+from config import MODEL_NAME, MPV_PATH, YT_DLP_PATH
+from agent import create_agent_executor
+from tools import ALL_TOOLS
+
+# Global agent executor (cached)
+agent_executor = create_agent_executor()
+
+# --- Fast-path: Play music / video via YouTube (Unchanged) ---
+def fast_play_music(full_query: str) -> None:
+    """Handles 'play [song]' or 'listen to [music]' queries."""
+    print(f"⚡ Fast-path detected! Searching and playing: {full_query}")
+    try:
+        # Assuming youtube_search_tool is imported and works as intended
+        from tools import youtube_search_tool
+        result = youtube_search_tool.run(full_query)
+        if "Found YouTube URL:" in result:
+            url = result.split("Found YouTube URL:")[1].strip()
+            print(f"Found URL: {url}. Proposing playback...")
+            confirmation = input("Do you want to play this video? [y/N]: ").strip().lower()
+            if confirmation in ['y', 'yes']:
+                command = f"{MPV_PATH} '{url}'"
+                print(f"Playing: {command}")
+                subprocess.Popen(command, shell=True)
+                cprint("\n✅ Playback started.", color="green")
+            else:
+                cprint("Playback cancelled.", color="yellow")
+        else:
+            cprint(f"❌ Could not find a YouTube video for '{full_query}'.", color="red")
+    except Exception as e:
+        cprint(f"❌ Error during playback: {e}", color="red")
+
+
+
+# main.py (updated function)
+
+async def process_prompt_with_events(full_prompt: str) -> None:
+    """
+    Handles routing and executes the agent using astream_events() 
+    for real-time streaming with a clean, colored interface.
+    """
+    print(f"🤖 DEBUG: Processing prompt: '{full_prompt}'")
+    
+    play_keywords = ["play", "listen", "song", "music", "video", "watch"]
+    if any(kw.lower() in full_prompt.lower() for kw in play_keywords):
+        print("🎵 DEBUG: Detected music/video query, using fast path")
+        fast_play_music(full_prompt)
+        return
+
+    try:
+        final_answer = ""
+        cprint("\n🤖 AI Response:", color="cyan")
+        
+        iteration_count = 0
+        async for event in agent_executor.astream_events(
+            {"input": full_prompt},
+            version="v1",
+        ):
+            iteration_count += 1
+            kind = event["event"]
+            
+            print(f"🔄 DEBUG: Event {iteration_count} - {kind}")
+            
+            if kind == "on_chat_model_stream":
+                content = event["data"]["chunk"].content
+                if content:
+                    sys.stdout.write(content)
+                    sys.stdout.flush()
+                    final_answer += content
+            
+            elif kind == "on_tool_start":
+                tool_name = event['name']
+                tool_input = event['data'].get('input', '')
+                print(f"🛠️ DEBUG: Tool START - {tool_name} with input: {tool_input}")
+                
+                sys.stdout.flush() 
+                if tool_name != 'dad_joke_tool':
+                    cprint(f"\n\n🛠️ Calling Tool: {tool_name}", color="yellow")
+            
+            elif kind == "on_tool_end":
+                tool_name = event['name']
+                output = event['data'].get('output', '')
+                print(f"🛠️ DEBUG: Tool END - {tool_name} with output length: {len(output)}")
+                
+                if tool_name != 'dad_joke_tool':
+                    if output and len(output) < 200:
+                        cprint(f"🔍 Tool Result: {output}", color="magenta")
+                    else:
+                        cprint(f"🔍 Tool Result: [Output too long to display]", color="magenta")
+
+            elif kind == "on_chain_end":
+                chain_name = event["name"]
+                print(f"⛓️ DEBUG: Chain END - {chain_name}")
+                if chain_name == "AgentExecutor":
+                    if not final_answer:
+                        final_answer = event['data'].get('output')['output']
+                        sys.stdout.write(final_answer)
+                        sys.stdout.flush()
+                        print(f"📝 DEBUG: Final answer set from chain end: {len(final_answer)} chars")
+
+            elif kind == "on_chain_start":
+                chain_name = event["name"]
+                print(f"⛓️ DEBUG: Chain START - {chain_name}")
+
+        print(f"✅ DEBUG: Processing complete. Total events: {iteration_count}")
+
+    except Exception as e:
+        cprint(f"\n❌ An error occurred: {e}", color="red")
+        import traceback
+        traceback.print_exc()
+
+async def run_command(prompt_list: List[str]) -> None:
+    """Handles the 'run' command logic."""
+    if not prompt_list:
+        cprint("Error: The 'run' command requires a prompt.", color="red")
+        return
+    full_prompt = " ".join(prompt_list)
+    await process_prompt_with_events(full_prompt)
+
+async def chat_command() -> None:
+    """Handles the 'chat' command logic (REPL)."""
+    cprint("Entering chat mode. Type 'exit' or 'quit' to end.", color="yellow")
+    while True:
+        prompt_text = f"\n\n{COLORS['green']}> {COLORS['end']}"
+        try:
+            prompt = input(prompt_text)
+            if prompt.lower() in ["exit", "quit"]:
+                cprint("Exiting chat.", color="yellow")
+                break
+            final_prompt = prompt
+            joke_keywords = ["dad joke", "new joke", "another joke", "joke"]
+            await process_prompt_with_events(prompt)
+        except (KeyboardInterrupt, EOFError):
+            cprint("\nExiting chat.", color="yellow")
+            break
+
+
+async def main():
+    """Main async function to parse args and dispatch commands."""
+    args = sys.argv[1:]
+    if not args:
+        print("Cluj-AI: A local-first, AI-powered terminal assistant.")
+        print("\nUsage:")
+        print("  python main.py run <prompt...>")
+        print("  python main.py chat")
+        return
+
+    command = args[0]
+    if command == "run":
+        await run_command(args[1:])
+    elif command == "chat":
+        await chat_command()
+    else:
+        cprint(f"Error: Unknown command '{command}'", color="red")
+
+# === MAIN ENTRY POINT ===
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        # This is handled in chat_command, but is a good failsafe
+        print("\nExiting.")
+import subprocess
+import os
+import shutil
+import shlex # Used for safe command construction
+from functools import lru_cache
+import hashlib
+from pathlib import Path
+# import yt_dlp # Use the yt-dlp library directly for robust searching
+from langchain.agents import tool
+from langchain_community.utilities import GoogleSerperAPIWrapper
+import asyncio 
+
+from config import MPV_PATH # Only mpv path is needed now
+import requests
+
+import json
+import hashlib
+import re
+from datetime import datetime, timedelta
+from pathlib import Path
+import re
+from typing import Dict, Callable
+
+# Pre-defined tool routing - bypasses agent decision making
+TOOL_ROUTING_RULES = {
+    # Search patterns
+    r'(who|what|when|where|why|how).*\?': 'search_tool',
+    r'(news|current|latest|recent|update|happened)': 'search_tool',
+    r'(president|prime minister|ceo|leader)': 'search_tool',
+    r'(capital|population|weather|temperature)': 'search_tool',
+    r'search for|look up|find.*about': 'search_tool',
+    
+    # Weather patterns
+    r'weather|temperature|forecast|raining|snowing': 'weather_tool',
+    
+    # Joke patterns  
+    r'joke|funny|humor|dad joke': 'dad_joke_tool',
+    
+    # Command patterns
+    r'run |execute |command |terminal |shell ': 'terminal_tool',
+}
+
+def route_to_tool_directly(query: str) -> str | None:
+    """Fast tool routing without agent decision making."""
+    query_lower = query.lower().strip()
+    
+    for pattern, tool_name in TOOL_ROUTING_RULES.items():
+        if re.search(pattern, query_lower):
+            return tool_name
+    
+    return None
+
+# Fast cached search tool with minimal overhead
+@tool
+def search_tool(query: str) -> str:
+    """Search the web with caching. FAST VERSION."""
+    # Ultra-fast cache check
+    cache_file = get_cache_file(query)
+    if cache_file.exists():
+        try:
+            cache_data = json.loads(cache_file.read_text())
+            cached_time = datetime.fromisoformat(cache_data['timestamp'])
+            if datetime.now() - cached_time < CACHE_DURATION:
+                return cache_data['result']
+        except:
+            pass  # If cache read fails, continue to normal search
+    
+    # If we get here, do the actual search
+    try:
+        response = requests.get(
+            "http://searxng:8080/search",
+            params={'q': query, 'format': 'json', 'language': 'en'},
+            timeout=8
+        )
+        data = response.json()
+        results = data.get("results", [])
+        
+        if not results:
+            result_text = "No results found."
+        else:
+            output = ["--- SEARCH RESULTS ---"]
+            for i, result in enumerate(results[:3]):  # Only 3 results for speed
+                title = result.get('title', 'No Title')
+                url = result.get('url', '#')
+                content = result.get('content', '')[:100]  # Shorter snippets
+                output.append(f"{i+1}. {title}\n   URL: {url}\n   Snippet: {content}")
+            result_text = "\n".join(output) + "\n--- END ---"
+        
+        # Cache the result
+        save_to_cache_fast(query, result_text)
+        return result_text
+        
+    except Exception as e:
+        return f"Search error: {e}"
+
+def save_to_cache_fast(query: str, result: str):
+    """Fast cache saving without pretty printing."""
+    cache_file = get_cache_file(query)
+    cache_data = {
+        'timestamp': datetime.now().isoformat(),
+        'query': query,
+        'result': result
+    }
+    cache_file.write_text(json.dumps(cache_data))  # No indent for speed
+
+    
+@tool
+def terminal_tool(command: str) -> str:
+    """Execute shell command. Safe input and confirmation required."""
+    cleaned_command = command.strip()
+    parts = cleaned_command.split()
+    if parts and parts[0] == "mpv":
+        cmd = f"{MPV_PATH} {' '.join(parts[1:])}"
+    else:
+        cmd = cleaned_command
+
+    print(f"\033[93mProposed command: `\033[1m{cmd}\033[0m\033[93m`\033[0m")
+    confirmation = input("Execute? [y/N]: ").strip().lower()
+    if confirmation not in ['y', 'yes']:
+        return "Command cancelled by user."
+
+    if not shutil.which(parts[0] if parts else ""):
+        return f"Error: Command '{parts[0]}' not found in PATH."
+
+    try:
+        if parts[0] in ['mpv', 'xdg-open']:
+            subprocess.Popen(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            return f"Started '{parts[0]}' in background."
+        else:
+            result = subprocess.run(cmd, shell=True, check=True, capture_output=True, text=True)
+            return f"✅ Output:\n{result.stdout}\n❌ Errors:\n{result.stderr}"
+    except Exception as e:
+        return f"❌ Error: {e}"
+
+
+@tool
+def weather_tool(location: str) -> str:
+    """Get weather information using wttr.in."""
+    if (debug):
+        print(f"🌤️ DEBUG: Weather tool called with location: '{location}'")
+    
+    try:
+        location = location.strip()
+        if not location:
+            return "Error: No location provided."
+            
+        if (debug):
+            print(f"🌤️ DEBUG: Making weather request for: {location}")
+        
+        # Use requests instead of curl
+        url = f"http://wttr.in/{location}"
+        params = {
+            'format': '%l: %c %t %w %h',  # Location: Condition Temperature Wind Humidity
+        }
+        
+        if (debug):
+            print(f"🌤️ DEBUG: Request URL: {url}")
+        
+        response = requests.get(url, params=params, timeout=10)
+        if (debug):
+            print(f"🌤️ DEBUG: Response status: {response.status_code}")
+        
+        if response.status_code == 200:
+            weather_data = response.text.strip()
+            if (debug):
+                print(f"🌤️ DEBUG: Raw weather data: '{weather_data}'")
+            
+            if weather_data and "unknown location" not in weather_data.lower():
+                return weather_data
+            else:
+                return f"Could not find weather for: {location}"
+        else:
+            return f"Weather service error: HTTP {response.status_code}"
+            
+    except requests.exceptions.Timeout:
+        if (debug):
+            print("🌤️ DEBUG: Weather request timed out")
+        return "Error: Weather service timed out."
+    except requests.exceptions.ConnectionError:
+        if (debug):
+            print("🌤️ DEBUG: Cannot connect to weather service")
+        return "Error: Cannot connect to weather service. Check network connectivity."
+    except Exception as e:
+        if (debug):
+            print(f"🌤️ DEBUG: Weather tool exception: {e}")
+        return f"Error fetching weather: {e}"
+
+@tool
+def dad_joke_tool(query: str = "") -> str:
+    """Get a random dad joke."""
+    print("😄 Fetching dad joke...")
+    try:
+        import random
+        random_param = random.randint(1, 100000)
+        cmd = f'curl -s -H "Accept: text/plain" -H "User-Agent: Cluj-AI Assistant" "https://icanhazdadjoke.com/?_{random_param}"'
+        result = subprocess.run(
+            cmd, shell=True, check=True, capture_output=True, text=True, timeout=10
+        )
+        joke_text = result.stdout.strip()
+        if not joke_text:
+            return "Could not fetch a joke at this time."
+        # Return ONLY the joke - no formatting
+        return joke_text
+    except Exception as e:
+        return f"Error fetching joke: {e}"
+
+
+@tool
+def ascii_art_tool(art_name: str) -> str:
+    """Fetch ASCII art from reliable sources."""
+    art_name = art_name.strip().lower()
+    
+    # Use asciiart.club which is more reliable
+    cmd = f"curl -s --max-time 10 'https://asciiart.club/api/search?q={shlex.quote(art_name)}'"
+    
+    try:
+        result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=15)
+        output = result.stdout.strip()
+        
+        if output and len(output) > 10:
+            return output
+        else:
+            # Fallback to static ASCII art
+            return get_static_ascii_art(art_name)
+            
+    except Exception:
+        return get_static_ascii_art(art_name)
+
+
+# --- All available tools for the agent ---
+ALL_TOOLS = [
+    search_tool,
+    terminal_tool,
+    weather_tool,
+    dad_joke_tool,
+]
+
+

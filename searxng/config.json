@@ -1,0 +1,9 @@
+{
+  "base_url": "http://localhost:5000",
+  "api": {
+    "enabled": true
+  },
+  "search": {
+    "enabled": true
+  }
+}
