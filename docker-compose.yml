@@ -6,7 +6,7 @@ services:
     ports:
       - "3000:8080"
     volumes:
-      - /home/ian/aim/searxng/settings.yml:/etc/searxng/settings.yml:ro
+      - ./searxng/:/etc/searxng:ro
     networks:
       - app-network
     restart: unless-stopped
