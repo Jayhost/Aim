@@ -1,0 +1,64 @@
+version: '3.8'
+
+services:
+  searxng:
+    image: searxng/searxng:latest
+    ports:
+      - "3000:8080"
+    volumes:
+      - ./searxng/:/etc/searxng:ro
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  llama:
+    image: ghcr.io/ggml-org/llama.cpp:server-vulkan
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./models:/models
+    environment:
+      - MODEL=/models/Qwen3-4B-Instruct-2507-Q4_K_S.gguf
+      - PORT=8080
+      - HOST=0.0.0.0
+      - N=512
+    networks:
+      - app-network
+    command: [
+      "--model", "/models/Qwen3-4B-Instruct-2507-Q4_K_S.gguf",
+      "-ngl", "99",
+      "-c", "8000", 
+      "-ts", "6,2",
+      "--port", "8080",
+      "--jinja"
+    ]
+    restart: unless-stopped
+
+  api-server:
+    build:
+      context: ./api_server
+      dockerfile: Dockerfile-api
+    ports:
+      - "8000:8000"
+    environment:
+      - HOST=0.0.0.0
+      - PORT=8000
+    networks:
+      - app-network
+    restart: unless-stopped
+
+  blazor-app:
+    build:
+      context: ./blazor-app
+      dockerfile: Dockerfile-blazor
+    ports:
+      - "5000:8080"
+    networks:
+      - app-network
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
+networks:
+  app-network:
+    driver: bridge
