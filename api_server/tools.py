@@ -88,7 +88,36 @@ def route_to_tool_directly(query: str) -> str | None:
     
     return None
 
-# Fast cached search tool with minimal overhead
+# @tool
+# def search_tool(query: str) -> str:
+#     """Search the web with caching. FAST VERSION."""
+#     # Ultra-fast cache check
+#     cache_file = get_cache_file(query)
+#     if cache_file.exists():
+#         try:
+#             cache_data = json.loads(cache_file.read_text())
+#             cached_time = datetime.fromisoformat(cache_data['timestamp'])
+#             if datetime.now() - cached_time < CACHE_DURATION:
+#                 return cache_data['result']
+#         except:
+#             pass  # If cache read fails, continue to normal search
+    
+#     # If we get here, do the actual search
+#     try:
+#         # Try multiple SearXNG instances
+#         instances = [
+#             "https://search.rhscz.eu/search",
+#             "https://priv.au/search", 
+#             "https://searx.perennialte.ch/search"
+#         ]
+        
+#         for instance in instances:
+#             try:
+#                 response = requests.get(
+#                     instance,
+#                     params={'q': query, 'format': 'json', 'language': 'en'},
+
+
 @tool
 def search_tool(query: str) -> str:
     """Search the web with caching. FAST VERSION."""
@@ -105,23 +134,53 @@ def search_tool(query: str) -> str:
     
     # If we get here, do the actual search
     try:
+        # Use Startpage (more reliable than SearXNG instances)
         response = requests.get(
-            "http://searxng:8080/search",
-            params={'q': query, 'format': 'json', 'language': 'en'},
-            timeout=8
+            "https://www.startpage.com/sp/search",
+            params={
+                'query': query,
+                'language': 'english',
+                'lui': 'english'
+            },
+            headers={
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
+            },
+            timeout=10
         )
-        data = response.json()
-        results = data.get("results", [])
+        
+        # Parse the HTML response from Startpage
+        from bs4 import BeautifulSoup
+        soup = BeautifulSoup(response.content, 'html.parser')
+        
+        # Extract search results
+        results = []
+        
+        # Startpage result selectors (may need adjustment)
+        result_blocks = soup.select('.w-gl__result, .result, .search-result')
+        
+        for block in result_blocks[:5]:  # Get top 5 results
+            title_elem = block.select_one('h3, .title, .result-title')
+            url_elem = block.select_one('a, .result-url')
+            desc_elem = block.select_one('.desc, .result-description, .snippet')
+            
+            title = title_elem.get_text().strip() if title_elem else "No Title"
+            url = url_elem.get('href', '') if url_elem else "No URL"
+            description = desc_elem.get_text().strip() if desc_elem else "No description"
+            
+            if title != "No Title":  # Only add valid results
+                results.append({
+                    'title': title,
+                    'url': url,
+                    'description': description[:150]  # Limit description length
+                })
         
         if not results:
             result_text = "No results found."
         else:
             output = ["--- SEARCH RESULTS ---"]
-            for i, result in enumerate(results[:3]):  # Only 3 results for speed
-                title = result.get('title', 'No Title')
-                url = result.get('url', '#')
-                content = result.get('content', '')[:100]  # Shorter snippets
-                output.append(f"{i+1}. {title}\n   URL: {url}\n   Snippet: {content}")
+            for i, result in enumerate(results):
+                output.append(f"{i+1}. {result['title']}\n   URL: {result['url']}\n   Description: {result['description']}")
             result_text = "\n".join(output) + "\n--- END ---"
         
         # Cache the result
@@ -129,8 +188,11 @@ def search_tool(query: str) -> str:
         return result_text
         
     except Exception as e:
-        return f"Search error: {e}"
-
+        error_text = f"Search error: {e}"
+        # Still cache errors to avoid retrying too frequently
+        save_to_cache_fast(query, error_text)
+        return error_text
+    
 def save_to_cache_fast(query: str, result: str):
     """Fast cache saving without pretty printing."""
     cache_file = get_cache_file(query)

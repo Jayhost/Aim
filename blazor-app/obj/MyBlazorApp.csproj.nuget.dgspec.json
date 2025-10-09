@@ -1,17 +1,17 @@
 {
   "format": 1,
   "restore": {
-    "/home/ian/Aim/blazor-app/MyBlazorApp.csproj": {}
+    "/home/ian/local-ai/blazor-app/MyBlazorApp.csproj": {}
   },
   "projects": {
-    "/home/ian/Aim/blazor-app/MyBlazorApp.csproj": {
+    "/home/ian/local-ai/blazor-app/MyBlazorApp.csproj": {
       "version": "1.0.0",
       "restore": {
-        "projectUniqueName": "/home/ian/Aim/blazor-app/MyBlazorApp.csproj",
+        "projectUniqueName": "/home/ian/local-ai/blazor-app/MyBlazorApp.csproj",
         "projectName": "MyBlazorApp",
-        "projectPath": "/home/ian/Aim/blazor-app/MyBlazorApp.csproj",
+        "projectPath": "/home/ian/local-ai/blazor-app/MyBlazorApp.csproj",
         "packagesPath": "/home/ian/.nuget/packages/",
-        "outputPath": "/home/ian/Aim/blazor-app/obj/",
+        "outputPath": "/home/ian/local-ai/blazor-app/obj/",
         "projectStyle": "PackageReference",
         "configFilePaths": [
           "/home/ian/.nuget/NuGet/NuGet.Config"

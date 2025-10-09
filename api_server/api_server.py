@@ -49,7 +49,8 @@ origins = [
     "http://localhost:5000", # Example Blazor dev server port
     "https://localhost:5001",
     "http://localhost:5199", # Another common Blazor port
-    "https://localhost:7155"
+    "https://localhost:7155",
+    "https://localhost"
 ]
 
 app.add_middleware(
@@ -192,7 +193,7 @@ async def test_search():
     """Test the search tool directly"""
     try:
         from tools import search_tool
-        result = search_tool("current president of the United States")
+        result = search_tool("search again president of the United States")
         return {
             "status": "search_tool test completed",
             "result_length": len(result),
@@ -200,6 +201,20 @@ async def test_search():
         }
     except Exception as e:
         return {"status": "search_tool test failed", "error": str(e)}
+    
+@app.get("/test-duckduckgo")
+async def test_duckduckgo():
+    """Test DuckDuckGo search"""
+    try:
+        from tools import search_tool
+        result = search_tool("search my president of the United States")
+        return {
+            "status": "DuckDuckGo test completed",
+            "result_length": len(result),
+            "result": result
+        }
+    except Exception as e:
+        return {"status": "test failed", "error": str(e)}
 
 if __name__ == "__main__":
     import uvicorn

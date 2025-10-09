@@ -23,7 +23,7 @@ def create_agent_executor():
 
     if _cached_llm is None:
         _cached_llm = ChatOpenAI(
-            base_url="http://llama:8080/v1",
+            base_url="http://localhost:8080/v1",
             api_key="sk-no-key-required",
             model=MODEL_NAME,
             streaming=True,

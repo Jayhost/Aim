@@ -7,6 +7,8 @@ sse-starlette>=1.6.0
 langchain>=0.0.300
 langchain-openai
 langchain_community
+beautifulsoup4==4.12.2
+
 
 
 
