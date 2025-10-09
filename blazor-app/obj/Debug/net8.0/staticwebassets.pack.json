@@ -1,75 +1,75 @@
 {
   "Files": [
     {
-      "Id": "/home/ian/local-ai/blazor-app/obj/Debug/net8.0/scopedcss/projectbundle/MyBlazorApp.bundle.scp.css",
+      "Id": "/home/ian/Aim/blazor-app/obj/Debug/net8.0/scopedcss/projectbundle/MyBlazorApp.bundle.scp.css",
       "PackagePath": "staticwebassets/MyBlazorApp.bundle.scp.css"
     },
     {
-      "Id": "/home/ian/local-ai/blazor-app/wwwroot/MyBlazorApp",
+      "Id": "/home/ian/Aim/blazor-app/wwwroot/MyBlazorApp",
       "PackagePath": "staticwebassets"
     },
     {
-      "Id": "/home/ian/local-ai/blazor-app/wwwroot/MyBlazorApp.deps.json",
+      "Id": "/home/ian/Aim/blazor-app/wwwroot/MyBlazorApp.deps.json",
       "PackagePath": "staticwebassets/MyBlazorApp.deps.json"
     },
     {
-      "Id": "/home/ian/local-ai/blazor-app/wwwroot/MyBlazorApp.dll",
+      "Id": "/home/ian/Aim/blazor-app/wwwroot/MyBlazorApp.dll",
       "PackagePath": "staticwebassets/MyBlazorApp.dll"
     },
     {
-      "Id": "/home/ian/local-ai/blazor-app/wwwroot/MyBlazorApp.pdb",
+      "Id": "/home/ian/Aim/blazor-app/wwwroot/MyBlazorApp.pdb",
       "PackagePath": "staticwebassets/MyBlazorApp.pdb"
     },
     {
-      "Id": "/home/ian/local-ai/blazor-app/wwwroot/MyBlazorApp.runtimeconfig.json",
+      "Id": "/home/ian/Aim/blazor-app/wwwroot/MyBlazorApp.runtimeconfig.json",
       "PackagePath": "staticwebassets/MyBlazorApp.runtimeconfig.json"
     },
     {
-      "Id": "/home/ian/local-ai/blazor-app/wwwroot/app.css",
+      "Id": "/home/ian/Aim/blazor-app/wwwroot/app.css",
       "PackagePath": "staticwebassets/app.css"
     },
     {
-      "Id": "/home/ian/local-ai/blazor-app/wwwroot/appsettings.Development.json",
+      "Id": "/home/ian/Aim/blazor-app/wwwroot/appsettings.Development.json",
       "PackagePath": "staticwebassets/appsettings.Development.json"
     },
     {
-      "Id": "/home/ian/local-ai/blazor-app/wwwroot/appsettings.json",
+      "Id": "/home/ian/Aim/blazor-app/wwwroot/appsettings.json",
       "PackagePath": "staticwebassets/appsettings.json"
     },
     {
-      "Id": "/home/ian/local-ai/blazor-app/wwwroot/bootstrap/bootstrap.min.css",
+      "Id": "/home/ian/Aim/blazor-app/wwwroot/bootstrap/bootstrap.min.css",
       "PackagePath": "staticwebassets/bootstrap/bootstrap.min.css"
     },
     {
-      "Id": "/home/ian/local-ai/blazor-app/wwwroot/bootstrap/bootstrap.min.css.map",
+      "Id": "/home/ian/Aim/blazor-app/wwwroot/bootstrap/bootstrap.min.css.map",
       "PackagePath": "staticwebassets/bootstrap/bootstrap.min.css.map"
     },
     {
-      "Id": "/home/ian/local-ai/blazor-app/wwwroot/favicon.png",
+      "Id": "/home/ian/Aim/blazor-app/wwwroot/favicon.png",
       "PackagePath": "staticwebassets/favicon.png"
     },
     {
-      "Id": "/home/ian/local-ai/blazor-app/wwwroot/web.config",
+      "Id": "/home/ian/Aim/blazor-app/wwwroot/web.config",
       "PackagePath": "staticwebassets/web.config"
     },
     {
-      "Id": "/home/ian/local-ai/blazor-app/wwwroot/wwwroot/MyBlazorApp.styles.css",
+      "Id": "/home/ian/Aim/blazor-app/wwwroot/wwwroot/MyBlazorApp.styles.css",
       "PackagePath": "staticwebassets/wwwroot/MyBlazorApp.styles.css"
     },
     {
-      "Id": "/home/ian/local-ai/blazor-app/wwwroot/wwwroot/app.css",
+      "Id": "/home/ian/Aim/blazor-app/wwwroot/wwwroot/app.css",
       "PackagePath": "staticwebassets/wwwroot/app.css"
     },
     {
-      "Id": "/home/ian/local-ai/blazor-app/wwwroot/wwwroot/bootstrap/bootstrap.min.css",
+      "Id": "/home/ian/Aim/blazor-app/wwwroot/wwwroot/bootstrap/bootstrap.min.css",
       "PackagePath": "staticwebassets/wwwroot/bootstrap/bootstrap.min.css"
     },
     {
-      "Id": "/home/ian/local-ai/blazor-app/wwwroot/wwwroot/bootstrap/bootstrap.min.css.map",
+      "Id": "/home/ian/Aim/blazor-app/wwwroot/wwwroot/bootstrap/bootstrap.min.css.map",
       "PackagePath": "staticwebassets/wwwroot/bootstrap/bootstrap.min.css.map"
     },
     {
-      "Id": "/home/ian/local-ai/blazor-app/wwwroot/wwwroot/favicon.png",
+      "Id": "/home/ian/Aim/blazor-app/wwwroot/wwwroot/favicon.png",
       "PackagePath": "staticwebassets/wwwroot/favicon.png"
     },
     {

@@ -1,8 +1,8 @@
 {
   "version": 2,
-  "dgSpecHash": "j8WkXR5Ks/bInr9lQu1sea/X8FQvw3cOUoNoTAoNZsRagMoCMlk056YdGEjkRIAO50cxUayvUnCiTTeIqk5pvQ==",
+  "dgSpecHash": "qD/VoyAHMlzEmCTdeGsk2ROhmDnvJbpyy0J0V5Ny6qfT48IYVO2f3WH8yFrnX6M+TstuEFLS8PiQBgeqPRulJQ==",
   "success": true,
-  "projectFilePath": "/home/ian/local-ai/blazor-app/MyBlazorApp.csproj",
+  "projectFilePath": "/home/ian/Aim/blazor-app/MyBlazorApp.csproj",
   "expectedPackageFiles": [],
   "logs": []
 }
