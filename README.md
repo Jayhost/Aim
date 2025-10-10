@@ -2,7 +2,9 @@
 Its about a.i.
 
 Instructions:
+
 Windows:
+
 I made batch files to run without Docker
 run
 install-deps.bat
@@ -13,6 +15,9 @@ run-services.sh
 Something like 
 https://huggingface.co/lmstudio-community/Llama-3.2-1B-Instruct-GGUF?show_file_info=Llama-3.2-1B-Instruct-Q4_K_M.gguf
 which is < 1gb should work.
+
+
+
 I prefer https://huggingface.co/unsloth/Qwen3-4B-Instruct-2507-GGUF?show_file_info=Qwen3-4B-Instruct-2507-Q4_K_M.gguf
 
 Linux:
