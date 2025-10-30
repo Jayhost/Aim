@@ -87,40 +87,42 @@ def route_to_tool_directly(query: str) -> str | None:
             return tool_name
     
     return None
-
-# @tool
-# def search_tool(query: str) -> str:
-#     """Search the web with caching. FAST VERSION."""
-#     # Ultra-fast cache check
-#     cache_file = get_cache_file(query)
-#     if cache_file.exists():
-#         try:
-#             cache_data = json.loads(cache_file.read_text())
-#             cached_time = datetime.fromisoformat(cache_data['timestamp'])
-#             if datetime.now() - cached_time < CACHE_DURATION:
-#                 return cache_data['result']
-#         except:
-#             pass  # If cache read fails, continue to normal search
+def clean_search_query(raw_query: str) -> str:
+    """Clean up repetitive model output for search queries."""
+    if not raw_query:
+        return "current events"
     
-#     # If we get here, do the actual search
-#     try:
-#         # Try multiple SearXNG instances
-#         instances = [
-#             "https://search.rhscz.eu/search",
-#             "https://priv.au/search", 
-#             "https://searx.perennialte.ch/search"
-#         ]
-        
-#         for instance in instances:
-#             try:
-#                 response = requests.get(
-#                     instance,
-#                     params={'q': query, 'format': 'json', 'language': 'en'},
+    # Remove repeating words/phrases
+    cleaned = re.sub(r'(\b\w+\b)(?:\s+\1\b)+', r'\1', raw_query)
+    
+    # Remove specific repetitive patterns
+    repetitive_patterns = [
+        r'(what happened to her|latest news about|,\s*)+',
+        r'(search for|find|look up)\s+(\1\s*)+'
+    ]
+    for pattern in repetitive_patterns:
+        cleaned = re.sub(pattern, r'\1', cleaned)
+    
+    # Extract the core query (first 6-8 words max)
+    words = cleaned.split()
+    if len(words) > 8:
+        words = words[:8]
+    
+    return ' '.join(words).strip()
 
+@tool
+def summarize_webpage_tool(content: str) -> str:
+    """Summarize webpage content. Input should be the full text content of a webpage."""
+    # This tool receives the content from the extension
+    # The LLM will automatically summarize it based on the system prompt
+    return f"Content to summarize (length: {len(content)} chars): {content[:2000]}..."
 
 @tool
 def search_tool(query: str) -> str:
     """Search the web with caching. FAST VERSION."""
+    # CLEAN THE QUERY FIRST - prevent search result feedback loops
+    query = clean_search_query(query)
+    
     # Ultra-fast cache check
     cache_file = get_cache_file(query)
     if cache_file.exists():
@@ -130,57 +132,26 @@ def search_tool(query: str) -> str:
             if datetime.now() - cached_time < CACHE_DURATION:
                 return cache_data['result']
         except:
-            pass  # If cache read fails, continue to normal search
-    
-    # If we get here, do the actual search
+            pass
+
     try:
-        # Use Startpage (more reliable than SearXNG instances)
         response = requests.get(
-            "https://www.startpage.com/sp/search",
-            params={
-                'query': query,
-                'language': 'english',
-                'lui': 'english'
-            },
-            headers={
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8'
-            },
-            timeout=10
+            "http://localhost:3000/search",
+            params={'q': query, 'format': 'json', 'language': 'en'},
+            timeout=8
         )
-        
-        # Parse the HTML response from Startpage
-        from bs4 import BeautifulSoup
-        soup = BeautifulSoup(response.content, 'html.parser')
-        
-        # Extract search results
-        results = []
-        
-        # Startpage result selectors (may need adjustment)
-        result_blocks = soup.select('.w-gl__result, .result, .search-result')
-        
-        for block in result_blocks[:5]:  # Get top 5 results
-            title_elem = block.select_one('h3, .title, .result-title')
-            url_elem = block.select_one('a, .result-url')
-            desc_elem = block.select_one('.desc, .result-description, .snippet')
-            
-            title = title_elem.get_text().strip() if title_elem else "No Title"
-            url = url_elem.get('href', '') if url_elem else "No URL"
-            description = desc_elem.get_text().strip() if desc_elem else "No description"
-            
-            if title != "No Title":  # Only add valid results
-                results.append({
-                    'title': title,
-                    'url': url,
-                    'description': description[:150]  # Limit description length
-                })
+        data = response.json()
+        results = data.get("results", [])
         
         if not results:
             result_text = "No results found."
         else:
             output = ["--- SEARCH RESULTS ---"]
-            for i, result in enumerate(results):
-                output.append(f"{i+1}. {result['title']}\n   URL: {result['url']}\n   Description: {result['description']}")
+            for i, result in enumerate(results[:3]):
+                title = result.get('title', 'No Title')
+                url = result.get('url', '#')
+                content = result.get('content', '')[:100]
+                output.append(f"{i+1}. {title}\n   URL: {url}\n   Snippet: {content}")
             result_text = "\n".join(output) + "\n--- END ---"
         
         # Cache the result
@@ -188,11 +159,26 @@ def search_tool(query: str) -> str:
         return result_text
         
     except Exception as e:
-        error_text = f"Search error: {e}"
-        # Still cache errors to avoid retrying too frequently
-        save_to_cache_fast(query, error_text)
-        return error_text
+        return f"Search error: {e}"
+
+def clean_search_query(raw_query: str) -> str:
+    """Clean search queries to prevent feedback loops."""
+    # If the query contains search result markers, extract just the original intent
+    if "--- SEARCH RESULTS ---" in raw_query or "URL: http" in raw_query:
+        # This is a search result being fed back - extract the core topic
+        lines = raw_query.split('\n')
+        for line in lines:
+            if line.strip() and not line.startswith(('   URL:', '   Snippet:', '---')):
+                # Take the first meaningful line as the query
+                words = line.split()[:6]  # First 6 words max
+                return ' '.join(words)
+        return "current events"  # Fallback
     
+    # Normal query cleaning
+    query = re.sub(r'\s+', ' ', raw_query.strip())
+    words = query.split()[:8]  # Limit to 8 words max
+    return ' '.join(words)
+
 def save_to_cache_fast(query: str, result: str):
     """Fast cache saving without pretty printing."""
     cache_file = get_cache_file(query)

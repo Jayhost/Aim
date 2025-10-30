@@ -4,12 +4,6 @@ python-multipart
 requests
 pydantic
 sse-starlette>=1.6.0
-langchain>=0.0.300
+langchain==0.1.20
 langchain-openai
-langchain_community
-beautifulsoup4==4.12.2
-
-
-
-
-
+langchain-community

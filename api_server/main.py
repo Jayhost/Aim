@@ -194,28 +194,3 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         # This is handled in chat_command, but is a good failsafe
         print("\nExiting.")
- 
-app.add_middleware( 
-    CORSMiddleware, 
-    allow_origins=["*"], 
-    allow_methods=["*"], 
-    allow_headers=["*"], 
-) 
- 
-@app.get("/") 
-async def root(): 
-    return {"message": "API Server Running"} 
- 
-@app.get("/search/{query}") 
-async def search(query: str): 
-    return {"query": query, "results": []} 
-@app.get("/") 
-async def root(): return {"message": "API Server Running"} 
-@app.get("/") 
-async def root(): return {"message": "API Server Running"} 
-@app.get("/") 
-async def root(): return {"message": "API Server Running"} 
-@app.get("/") 
-async def root(): return {"message": "API Server Running"} 
-@app.get("/") 
-async def root(): return {"message": "API Server Running"} 

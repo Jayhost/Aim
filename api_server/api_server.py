@@ -9,7 +9,7 @@ from sse_starlette.sse import EventSourceResponse
 import logging
 
 # Set up logging
-# logging.basicConfig(level=logging.DEBUG)
+logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger("api_server")
 
 # Import your existing agent creator
@@ -36,21 +36,32 @@ def ultra_fast_response(query: str) -> str | None:
     return None
 
 # Initialize the agent executor once on startup
-# logger.debug("🔄 Initializing agent executor...")
+logger.debug("🔄 Initializing agent executor...")
 agent_executor = create_agent_executor()
-# logger.debug("✅ Agent executor initialized")
+logger.debug("✅ Agent executor initialized")
 
 # --- FastAPI App Setup ---
 app = FastAPI()
 
 # Configure CORS to allow your Blazor app to connect
 # IMPORTANT: In production, you should restrict the origins.
+# Configure CORS to allow your extension to connect
+
+# origins = [
+#     "http://localhost:5000",
+#     "https://localhost:5001", 
+#     "http://localhost:5199",
+#     "https://localhost:7155",
+#     "chrome-extension://*",  # Chrome extensions
+#     "moz-extension://*",     # Firefox extensions
+# ]
 origins = [
-    "http://localhost:5000", # Example Blazor dev server port
-    "https://localhost:5001",
-    "http://localhost:5199", # Another common Blazor port
+    "http://localhost:5000",
+    "https://localhost:5001", 
+    "http://localhost:5199",
     "https://localhost:7155",
-    "https://localhost"
+    # Add these for development:
+    "*"  # Allow all (easiest for development)
 ]
 
 app.add_middleware(
@@ -70,7 +81,7 @@ async def stream_agent_response(chat_request: ChatRequest):
     """
     Calls the agent's astream_events and yields formatted Server-Sent Events.
     """
-    # logger.debug(f"🎯 Starting stream for query: '{chat_request.input}'")
+    logger.debug(f"🎯 Starting stream for query: '{chat_request.input}'")
     
     # ULTRA-FAST PRE-CHECK
     fast_response = ultra_fast_response(chat_request.input)
@@ -94,13 +105,13 @@ async def stream_agent_response(chat_request: ChatRequest):
             kind = event["event"]
             data_payload = {}
             
-            # logger.debug(f"🔄 Event {event_count}: {kind}")
+            logger.debug(f"🔄 Event {event_count}: {kind}")
 
             if kind == "on_chat_model_stream":
                 content = event["data"]["chunk"].content
                 if content:
                     data_payload = {"type": "token", "content": content}
-                    # logger.debug(f"💬 Token: {content[:50]}...")
+                    logger.debug(f"💬 Token: {content[:50]}...")
             
             elif kind == "on_tool_start":
                 tool_name = event['name']
@@ -110,7 +121,7 @@ async def stream_agent_response(chat_request: ChatRequest):
                     "name": tool_name,
                     "input": tool_input
                 }
-                # logger.debug(f"🛠️ Tool START: {tool_name} with input: {str(tool_input)[:100]}...")
+                logger.debug(f"🛠️ Tool START: {tool_name} with input: {str(tool_input)[:100]}...")
         
             elif kind == "on_tool_end":
                 tool_name = event['name']
@@ -120,8 +131,8 @@ async def stream_agent_response(chat_request: ChatRequest):
                     "name": tool_name,
                     "output": tool_output
                 }
-                # logger.debug(f"🛠️ Tool END: {tool_name} with output length: {len(str(tool_output))}")
-                # logger.debug(f"🛠️ Tool output sample: {str(tool_output)[:200]}...")
+                logger.debug(f"🛠️ Tool END: {tool_name} with output length: {len(str(tool_output))}")
+                logger.debug(f"🛠️ Tool output sample: {str(tool_output)[:200]}...")
 
             elif kind == "on_chain_start":
                 chain_name = event["name"]
@@ -141,12 +152,12 @@ async def stream_agent_response(chat_request: ChatRequest):
                     "data": json.dumps(data_payload)
                 }
                 
-        # logger.debug(f"✅ Stream completed. Total events: {event_count}")
+        logger.debug(f"✅ Stream completed. Total events: {event_count}")
 
     except Exception as e:
-        # logger.error(f"❌ Error in stream_agent_response: {e}")
+        logger.error(f"❌ Error in stream_agent_response: {e}")
         import traceback
-        # logger.error(f"❌ Traceback: {traceback.format_exc()}")
+        logger.error(f"❌ Traceback: {traceback.format_exc()}")
         
         # Yield an error event to the client
         error_payload = {
@@ -164,8 +175,82 @@ async def chat_endpoint(chat_request: ChatRequest):
     """
     The main chat endpoint that Blazor will call.
     """
-    # logger.debug(f"📥 Received chat request: '{chat_request.input}'")
+    logger.debug(f"📥 Received chat request: '{chat_request.input}'")
     return EventSourceResponse(stream_agent_response(chat_request))
+
+
+@app.post("/summarize")
+async def summarize_page(request: dict):
+    """
+    Directly summarize webpage content.
+    """
+    content = request.get("content", "")
+    url = request.get("url", "")
+    title = request.get("title", "")
+    
+    logger.info(f"📄 Summarize request for: {title}")
+    
+    async def summarize_generator():
+        try:
+            # Import and get the LLM
+            from agent import get_llm
+            
+            llm = get_llm()  # This will create it if needed
+            logger.info(f"✓ Got LLM: {llm}")
+            
+            # Create prompt
+            prompt = f"""Summarize the following webpage in a clear, structured format.
+
+Title: {title}
+URL: {url}
+
+Content:
+{content[:8000]}
+
+Format your summary like this:
+
+📌 Overview:
+[One sentence description]
+
+🔑 Key Points:
+• [Main point 1]
+• [Main point 2]
+• [Main point 3]
+
+💡 Takeaway:
+[Brief conclusion]
+
+Keep it concise and scannable and in ENGLISH"""
+
+            logger.info("🔄 Starting LLM stream...")
+            
+            # Stream the response
+            async for chunk in llm.astream(prompt):
+                if hasattr(chunk, 'content') and chunk.content:
+                    yield {
+                        "event": "message",
+                        "data": json.dumps({
+                            "type": "token",
+                            "content": chunk.content
+                        })
+                    }
+                    
+            logger.info("✅ Summary completed")
+                    
+        except Exception as e:
+            logger.error(f"❌ Summarization error: {e}")
+            import traceback
+            logger.error(f"Traceback:\n{traceback.format_exc()}")
+            
+            yield {
+                "event": "message",
+                "data": json.dumps({
+                    "type": "error",
+                    "content": f"Summarization failed: {str(e)}"
+                })
+            }
+    
+    return EventSourceResponse(summarize_generator())
 
 @app.get("/health")
 async def health_check():
@@ -193,7 +278,7 @@ async def test_search():
     """Test the search tool directly"""
     try:
         from tools import search_tool
-        result = search_tool("search again president of the United States")
+        result = search_tool("current president of the United States")
         return {
             "status": "search_tool test completed",
             "result_length": len(result),
@@ -201,20 +286,6 @@ async def test_search():
         }
     except Exception as e:
         return {"status": "search_tool test failed", "error": str(e)}
-    
-@app.get("/test-duckduckgo")
-async def test_duckduckgo():
-    """Test DuckDuckGo search"""
-    try:
-        from tools import search_tool
-        result = search_tool("search my president of the United States")
-        return {
-            "status": "DuckDuckGo test completed",
-            "result_length": len(result),
-            "result": result
-        }
-    except Exception as e:
-        return {"status": "test failed", "error": str(e)}
 
 if __name__ == "__main__":
     import uvicorn

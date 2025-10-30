@@ -1,0 +1,318 @@
+@echo off
+chcp 65001 >nul
+echo Installing Dependencies...
+cd /d "%~dp0"
+
+echo ========================================
+echo 1. Checking Python...
+echo ========================================
+where python >nul 2>nul
+if %errorlevel% neq 0 (
+    echo Python not found. Please install Python manually from:
+    echo https://www.python.org/downloads/
+    echo.
+    echo Make sure to check "Add Python to PATH" during installation!
+    echo.
+    pause
+) else (
+    python --version
+    echo Installing Python dependencies...
+    pip install searxng fastapi uvicorn requests
+    pip install beautifulsoup4
+
+)
+
+echo.
+echo ========================================
+echo 2. Checking Caddy...
+echo ========================================
+where caddy >nul 2>nul
+if %errorlevel% neq 0 (
+    echo Downloading Caddy...
+    powershell -Command "Invoke-WebRequest -Uri 'https://github.com/caddyserver/caddy/releases/download/v2.7.6/caddy_2.7.6_windows_amd64.zip' -OutFile 'caddy.zip'"
+    powershell -Command "Expand-Archive -Path 'caddy.zip' -DestinationPath '.' -Force"
+    del caddy.zip
+    echo Caddy installed locally.
+) else (
+    echo Caddy already installed.
+)
+
+echo.
+echo ========================================
+echo 3. Checking .NET...
+echo ========================================
+where dotnet >nul 2>nul
+if %errorlevel% neq 0 (
+    echo .NET not found. We'll use standalone publish for Blazor app.
+) else (
+    dotnet --version
+    echo .NET already installed.
+)
+
+echo.
+echo ========================================
+echo 4. Setting up Llama.cpp...
+echo ========================================
+if not exist "llama-server.exe" (
+    echo Downloading Llama.cpp binary package...
+    
+    REM Download the complete binary package
+    powershell -Command "Invoke-WebRequest -Uri 'https://github.com/ggml-org/llama.cpp/releases/download/b6715/llama-b6715-bin-win-vulkan-x64.zip' -OutFile 'llama-bin.zip'"
+    
+    if exist "llama-bin.zip" (
+        echo Extracting Llama.cpp binaries...
+        powershell -Command "Expand-Archive -Path 'llama-bin.zip' -DestinationPath 'llama-temp' -Force"
+        
+        REM Look for the server executable in the extracted files
+        if exist "llama-temp\server.exe" (
+            copy "llama-temp\server.exe" "llama-server.exe"
+            echo Llama server extracted successfully.
+        ) else if exist "llama-temp\bin\server.exe" (
+            copy "llama-temp\bin\server.exe" "llama-server.exe"
+            echo Llama server extracted successfully.
+        ) else (
+            echo Searching for server executable in extracted files...
+            dir llama-temp /s /b | findstr /i "server.exe"
+        )
+        
+        REM Clean up
+        if exist "llama-temp" rmdir /s /q "llama-temp"
+        if exist "llama-bin.zip" del "llama-bin.zip"
+        
+        if not exist "llama-server.exe" (
+            echo WARNING: Could not find server.exe in the downloaded package.
+            echo Please extract manually and rename server.exe to llama-server.exe
+        )
+    ) else (
+        echo Failed to download Llama.cpp package.
+        echo Please download manually from:
+        echo https://github.com/ggml-org/llama.cpp/releases
+    )
+) else (
+    echo Llama.cpp server already exists.
+)
+
+echo.
+echo ========================================
+echo 5. Creating project structure...
+echo ========================================
+if not exist "models" mkdir models
+if not exist "searxng" mkdir searxng
+if not exist "api_server" mkdir api_server
+if not exist "blazor-app" mkdir blazor-app
+
+echo.
+echo ========================================
+echo Installation Complete!
+echo ========================================
+echo Next steps:
+if not exist "llama-server.exe" (
+    echo 1. MANUAL STEP: Download and extract llama-server.exe
+    echo    Get from: https://github.com/ggml-org/llama.cpp/releases
+)
+echo 1. Place your model file in models\ folder
+echo 2. Add SearXNG settings to searxng\ folder  
+echo 3. Add your API server code to api_server\
+echo 4. Add your Blazor app to blazor-app\
+echo.
+echo Run start-services.bat to start all services
+pause@echo off
+chcp 65001 >nul
+echo Downloading Llama.cpp...
+echo.
+
+echo Downloading from:
+echo https://github.com/ggml-org/llama.cpp/releases/download/b6719/llama-b6719-bin-win-vulkan-x64.zip
+echo.
+
+powershell -Command "Invoke-WebRequest -Uri 'https://github.com/ggml-org/llama.cpp/releases/download/b6719/llama-b6719-bin-win-vulkan-x64.zip' -OutFile 'llama.zip'"
+
+if not exist "llama.zip" (
+    echo ❌ Download failed
+    pause
+    exit /b 1
+)
+
+echo Extracting...
+powershell -Command "Expand-Archive -Path 'llama.zip' -DestinationPath '.' -Force"
+
+echo Looking for server executable...
+if exist "llama-server.exe" (
+    echo ✅ Found llama-server.exe
+    goto :success
+)
+
+REM The files might be in a subdirectory
+for /d %%i in (*) do (
+    if exist "%%i\llama-server.exe" (
+        echo Found in subdirectory: %%i
+        copy "%%i\llama-server.exe" "llama-server.exe"
+        goto :success
+    )
+)
+
+echo ❌ Could not find llama-server.exe in the extracted files
+echo Contents:
+dir /b
+pause
+exit /b 1
+
+:success
+echo.
+echo ✅ Llama server ready!
+echo Cleanup...
+del llama.zip
+for /d %%i in (*) do (
+    if exist "%%i\llama-server.exe" (
+        echo Removing temp directory: %%i
+        rmdir /s /q "%%i"
+    )
+)
+
+echo.
+echo Test the server:
+echo llama-server --host 0.0.0.0 --port 8080
+pause@echo off
+cd /d "%~dp0"
+
+echo Starting Blazor WebAssembly App...
+
+REM Check for Blazor WebAssembly static files
+if exist "blazor-app\publish\wwwroot\index.html" (
+    echo Starting Blazor WebAssembly from: publish\wwwroot
+    start "Blazor App" /min cmd /c "cd blazor-app\publish\wwwroot && python -m http.server 5000"
+    goto :end
+)
+
+if exist "blazor-app\publish\index.html" (
+    echo Starting Blazor WebAssembly from: publish
+    start "Blazor App" /min cmd /c "cd blazor-app\publish && python -m http.server 5000"
+    goto :end
+)
+
+if exist "blazor-app\bin\Release\net8.0\publish\wwwroot\index.html" (
+    echo Starting Blazor WebAssembly from: bin\Release\net8.0\publish\wwwroot
+    start "Blazor App" /min cmd /c "cd blazor-app\bin\Release\net8.0\publish\wwwroot && python -m http.server 5000"
+    goto :end
+)
+
+echo ❌ No Blazor WebAssembly files found
+echo Creating placeholder...
+if not exist "blazor-placeholder" mkdir blazor-placeholder
+cd blazor-placeholder
+echo ^<html^>^<body^>^<h1^>Blazor App^</h1^>^<p^>Publish your Blazor WebAssembly app first^</p^>^</body^>^</html^> > index.html
+start "Blazor App" /min cmd /c "cd blazor-placeholder && python -m http.server 5000"
+
+:end
+echo Blazor WebAssembly app starting on http://localhost:5000@echo off
+chcp 65001 >nul
+echo Starting Llama Server...
+echo.
+
+if not exist "llama-server.exe" (
+    echo ❌ llama-server.exe not found
+    pause
+    exit /b 1
+)
+
+echo Looking for model files...
+dir models\*.gguf /b >nul 2>&1
+if %errorlevel% neq 0 (
+    echo ❌ No .gguf model files found in models\ folder
+    echo.
+    echo Download a model file first, for example:
+    echo https://huggingface.co/TheBloke/Mistral-7B-Instruct-v0.2-GGUF/resolve/main/mistral-7b-instruct-v0.2.Q4_K_M.gguf
+    pause
+    exit /b 1
+)
+
+echo Found models:
+for /f "delims=" %%i in ('dir models\*.gguf /b') do echo   - %%i
+
+echo.
+echo Using first model found...
+for /f "delims=" %%i in ('dir models\*.gguf /b') do (
+    echo Starting with model: %%i
+    llama-server --model models\%%i --host 0.0.0.0 -ngl 99 --port 8080 --jinja
+    goto :end
+)
+
+:end
+echo.
+pause@echo off
+chcp 65001 >nul
+cd /d "%~dp0"
+echo Starting All Services...
+echo.
+
+REM Kill any existing services
+call stop-services.bat >nul 2>&1
+
+REM Start Caddy
+echo Starting Caddy...
+start "Caddy" /min cmd /c "caddy run"
+
+REM Start API Server
+echo Starting API Server...
+start "API Server" /min cmd /c "cd api_server && python -m uvicorn api_server:app --host 0.0.0.0 --port 8000"
+
+REM Start Blazor App
+echo Starting Blazor App...
+timeout /t 2 >nul
+start "Blazor" /min cmd /c "cd blazor-app\publish\wwwroot && python -m http.server 5000"
+
+REM Start Llama (if model exists)
+echo Checking for Llama...
+dir models\*.gguf >nul 2>&1
+if %errorlevel% equ 0 (
+    if exist "llama-server.exe" (
+        echo Starting Llama Server...
+        start "Llama" /min cmd /c "start-llama.bat"
+    ) else (
+        echo Llama server not available
+    )
+) else (
+    echo No model files found for Llama
+)
+
+echo.
+echo Waiting for services to start...
+timeout /t 5 >nul
+
+echo.
+echo ========================================
+echo Services Status:
+echo ========================================
+call :check_service 5000 "Blazor App"
+call :check_service 8000 "API Server" 
+call :check_service 8080 "Llama Server"
+call :check_service 80 "Caddy Proxy"
+
+echo.
+echo ========================================
+echo Access URLs:
+echo ========================================
+echo Main Portal: http://localhost
+echo Blazor Direct: http://localhost:5000
+echo API Direct: http://localhost:8000
+if exist "models\*.gguf" if exist "llama-server.exe" echo Llama Direct: http://localhost:8080
+echo.
+echo Press any key to stop all services...
+pause >nul
+
+call stop-services.bat
+exit /b 0
+
+:check_service
+netstat -ano | findstr ":%1 " >nul
+if %errorlevel% equ 0 (
+    echo ✅ %~2
+) else (
+    echo ❌ %~2
+)
+exit /b 0@echo off
+echo Stopping all services...
+taskkill /f /im python.exe >nul 2>&1
+taskkill /f /im caddy.exe >nul 2>&1
+taskkill /f /im llama-server.exe >nul 2>&1
+echo All services stopped
